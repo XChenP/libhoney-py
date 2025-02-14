@@ -2,25 +2,27 @@ import logging
 import re
 import queue
 
+
 from libhoney.event import Event
 from libhoney.builder import Builder
 from libhoney.fields import FieldHolder
 from libhoney.transmission import Transmission
+from libhoney.marker import Marker
 
 
 def IsClassicKey(key):
-    '''Returns true if the API key is a Classic key or a Classic Ingest Key'''
+    """Returns true if the API key is a Classic key or a Classic Ingest Key"""
     if not key:
         return True
-    if re.match(r'^[a-f0-9]{32}$', key):
+    if re.match(r"^[a-f0-9]{32}$", key):
         return True
-    if re.match(r'^hc[a-z]ic_[a-z0-9]{58}$', key):
+    if re.match(r"^hc[a-z]ic_[a-z0-9]{58}$", key):
         return True
     return False
 
 
 class Client(object):
-    '''Instantiate a libhoney Client that can prepare and send events to Honeycomb.
+    """Instantiate a libhoney Client that can prepare and send events to Honeycomb.
 
     Note that libhoney Clients initialize a number of threads to handle
     sending payloads to Honeycomb. Client initialization is heavy, and re-use
@@ -66,20 +68,31 @@ class Client(object):
     - `user_agent_addition`: if set, its contents will be appended to the
             User-Agent string, separated by a space. The expected format is
             product-name/version, eg "myapp/1.0"
-    '''
+    """
 
-    def __init__(self, writekey="", dataset="", sample_rate=1,
-                 api_host="https://api.honeycomb.io",
-                 max_concurrent_batches=10, max_batch_size=100,
-                 send_frequency=0.25, block_on_send=False,
-                 block_on_response=False, transmission_impl=None,
-                 user_agent_addition='', debug=False):
-
+    def __init__(
+        self,
+        writekey="",
+        dataset="",
+        sample_rate=1,
+        api_host="https://api.honeycomb.io",
+        max_concurrent_batches=10,
+        max_batch_size=100,
+        send_frequency=0.25,
+        block_on_send=False,
+        block_on_response=False,
+        transmission_impl=None,
+        user_agent_addition="",
+        debug=False,
+    ):
         self.xmit = transmission_impl
         if self.xmit is None:
             self.xmit = Transmission(
-                max_concurrent_batches=max_concurrent_batches, block_on_send=block_on_send, block_on_response=block_on_response,
-                user_agent_addition=user_agent_addition, debug=debug,
+                max_concurrent_batches=max_concurrent_batches,
+                block_on_send=block_on_send,
+                block_on_response=block_on_response,
+                user_agent_addition=user_agent_addition,
+                debug=debug,
             )
 
         self.xmit.start()
@@ -96,26 +109,25 @@ class Client(object):
         if debug:
             self._init_logger()
 
-        self.log('initialized honeycomb client: writekey=%s dataset=%s',
-                 writekey, dataset)
+        self.log(
+            "initialized honeycomb client: writekey=%s dataset=%s", writekey, dataset
+        )
         if not writekey:
             self.log(
-                'writekey not set! set the writekey if you want to send data to honeycomb')
+                "writekey not set! set the writekey if you want to send data to honeycomb"
+            )
         if not dataset:
             if IsClassicKey(writekey):
                 self.log(
-                    'dataset not set! set a value for dataset if you want to send data to honeycomb')
-            else:
-                logging.error(
-                    'dataset not set! sending to unknown_dataset'
+                    "dataset not set! set a value for dataset if you want to send data to honeycomb"
                 )
+            else:
+                logging.error("dataset not set! sending to unknown_dataset")
                 self.dataset = "unknown_dataset"
 
         # whitespace detected. trim whitespace, warn on diff
         if dataset.strip() != dataset and not IsClassicKey(writekey):
-            logging.error(
-                'dataset has unexpected spaces'
-            )
+            logging.error("dataset has unexpected spaces")
             self.dataset = dataset.strip()
 
     # enable use in a context manager
@@ -123,17 +135,19 @@ class Client(object):
         return self
 
     def __exit__(self, typ, value, tb):
-        '''Clean up Transmission if client gets garbage collected'''
+        """Clean up Transmission if client gets garbage collected"""
         self.close()
 
     def _init_logger(self):
         import logging  # pylint: disable=bad-option-value,import-outside-toplevel
-        self._logger = logging.getLogger('honeycomb-sdk')
+
+        self._logger = logging.getLogger("honeycomb-sdk")
         self._logger.setLevel(logging.DEBUG)
         ch = logging.StreamHandler()
         ch.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
         ch.setFormatter(formatter)
         self._logger.addHandler(ch)
 
@@ -142,7 +156,7 @@ class Client(object):
             self._logger.debug(msg, *args, **kwargs)
 
     def responses(self):
-        '''Returns a queue from which you can read a record of response info from
+        """Returns a queue from which you can read a record of response info from
         each event sent. Responses will be dicts with the following keys:
 
         - `status_code` - the HTTP response from the api (eg. 200 or 503)
@@ -153,43 +167,45 @@ class Client(object):
 
         When the Client's `close` method is called, a None will be inserted on
         the queue, indicating that no further responses will be written.
-        '''
+        """
         return self._responses
 
     def add_field(self, name, val):
-        '''add a global field. This field will be sent with every event.'''
+        """add a global field. This field will be sent with every event."""
         self.fields.add_field(name, val)
 
     def add_dynamic_field(self, fn):
-        '''add a global dynamic field. This function will be executed every time an
+        """add a global dynamic field. This function will be executed every time an
         event is created. The key/value pair of the function's name and its
-        return value will be sent with every event.'''
+        return value will be sent with every event."""
         self.fields.add_dynamic_field(fn)
 
     def add(self, data):
-        '''add takes a mappable object and adds each key/value pair to the
-        global scope'''
+        """add takes a mappable object and adds each key/value pair to the
+        global scope"""
         self.fields.add(data)
 
     def send(self, event):
-        '''Enqueues the given event to be sent to Honeycomb.
+        """Enqueues the given event to be sent to Honeycomb.
 
         Should not be called directly. Instead, use Event:
             ev = client.new_event()
             ev.add(data)
             ev.send()
-        '''
+        """
         if self.xmit is None:
             self.log(
                 "tried to send on a closed or uninitialized libhoney client,"
-                " ev = %s", event.fields())
+                " ev = %s",
+                event.fields(),
+            )
             return
 
         self.log("send enqueuing event ev = %s", event.fields())
         self.xmit.send(event)
 
     def send_now(self, data):
-        '''
+        """
         DEPRECATED - This will likely be removed in a future major version.
 
         Creates an event with the data passed in and enqueues it to be sent.
@@ -200,14 +216,14 @@ class Client(object):
             ev = client.new_event()
             ev.add(data)
             ev.send()
-        '''
+        """
         ev = self.new_event()
         ev.add(data)
         self.log("send_now enqueuing event ev = %s", ev.fields())
         ev.send()
 
     def send_dropped_response(self, event):
-        '''push the dropped event down the responses queue'''
+        """push the dropped event down the responses queue"""
         response = {
             "status_code": 0,
             "duration": 0,
@@ -225,10 +241,10 @@ class Client(object):
             pass
 
     def close(self):
-        '''Wait for in-flight events to be transmitted then shut down cleanly.
+        """Wait for in-flight events to be transmitted then shut down cleanly.
         Optional (will be called automatically at exit) unless your
         application is consuming from the responses queue and needs to know
-        when all responses have been received.'''
+        when all responses have been received."""
 
         if self.xmit:
             self.xmit.close()
@@ -237,25 +253,25 @@ class Client(object):
         self.xmit = None
 
     def flush(self):
-        '''Closes and restarts the transmission, sending all events. Use this
+        """Closes and restarts the transmission, sending all events. Use this
         if you want to perform a blocking send of all events in your
         application.
 
         Note: does not work with asynchronous Transmission implementations such
         as TornadoTransmission.
-        '''
+        """
         if self.xmit and isinstance(self.xmit, Transmission):
             self.xmit.close()
             self.xmit.start()
 
     def new_event(self, data={}):
-        '''Return an Event, initialized to be sent with this client'''
+        """Return an Event, initialized to be sent with this client"""
         ev = Event(data=data, client=self)
         return ev
 
     def new_builder(self, data=None, dyn_fields=None, fields=None):
-        '''Return a Builder. Events built from this builder will be sent with
-        this client'''
+        """Return a Builder. Events built from this builder will be sent with
+        this client"""
         if data is None:
             data = {}
         if dyn_fields is None:
@@ -264,3 +280,7 @@ class Client(object):
             fields = FieldHolder()
         builder = Builder(data, dyn_fields, fields, self)
         return builder
+
+    def create_marker(self, start_time, message, end_time=None, type=None, url=None):
+        """Create a new marker in Honeycomb."""
+        return Marker(start_time, message, end_time, type, url)
